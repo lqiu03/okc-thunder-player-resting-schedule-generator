@@ -1,5 +1,3 @@
-# okc-thunder-player-resting-schedule-generator
-
 
 # OKC Thunder Player Rest Regular-Season Schedule Generator
 
