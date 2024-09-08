@@ -1,0 +1,172 @@
+library(shiny)
+library(dplyr)
+library(lubridate)
+
+# Original raw data
+okc_schedule <- data.frame(
+  date = as.Date(c("2024-10-24", "2024-10-26", "2024-10-27", "2024-10-30", "2024-11-01", 
+                   "2024-11-02", "2024-11-04", "2024-11-06", "2024-11-08", "2024-11-10", 
+                   "2024-11-11", "2024-11-13", "2024-11-15", "2024-11-17", "2024-11-19", 
+                   "2024-11-20", "2024-11-25", "2024-11-27", "2024-11-29", "2024-12-01", 
+                   "2024-12-03", "2024-12-05", "2024-12-07", "2024-12-19", "2024-12-20", 
+                   "2024-12-23", "2024-12-26", "2024-12-28", "2024-12-29", "2024-12-31", 
+                   "2025-01-02", "2025-01-03", "2025-01-05", "2025-01-08", "2025-01-10", 
+                   "2025-01-12", "2025-01-14", "2025-01-16", "2025-01-17", "2025-01-19", 
+                   "2025-01-22", "2025-01-23", "2025-01-26", "2025-01-29", "2025-02-01", 
+                   "2025-02-03", "2025-02-05", "2025-02-07", "2025-02-08", "2025-02-10", 
+                   "2025-02-12", "2025-02-13", "2025-02-21", "2025-02-23", "2025-02-24", 
+                   "2025-02-26", "2025-02-28", "2025-03-02", "2025-03-03", "2025-03-05", 
+                   "2025-03-07", "2025-03-09", "2025-03-10", "2025-03-12", "2025-03-15", 
+                   "2025-03-16", "2025-03-19", "2025-03-21", "2025-03-23", "2025-03-25", 
+                   "2025-03-27", "2025-03-29", "2025-03-31", "2025-04-02", "2025-04-04", 
+                   "2025-04-06", "2025-04-08", "2025-04-09", "2025-04-11", "2025-04-13")),
+  opponent = c("Denver", "Chicago", "Atlanta", "San Antonio", "Portland", "LA Clippers", 
+               "Orlando", "Denver", "Houston", "Golden State", "LA Clippers", "New Orleans", 
+               "Phoenix", "Dallas", "San Antonio", "Portland", "Sacramento", "Golden State", 
+               "LA Lakers", "Houston", "Utah", "Toronto", "New Orleans", "Orlando", "Miami", 
+               "Washington", "Indiana", "Charlotte", "Memphis", "Minnesota", "LA Clippers", 
+               "New York", "Boston", "Cleveland", "New York", "Washington", "Philadelphia", 
+               "Cleveland", "Dallas", "Brooklyn", "Utah", "Dallas", "Portland", "Golden State", 
+               "Sacramento", "Milwaukee", "Phoenix", "Toronto", "Memphis", "New Orleans", 
+               "Miami", "Minnesota", "Utah", "Minnesota", "Minnesota", "Brooklyn", "Atlanta", "San Antonio",
+               "Houston", "Memphis", "Portland", "Denver", "Denver", "Boston", "Detroit", 
+               "Milwaukee", "Philadelphia", "Charlotte", "LA Clippers", "Sacramento", 
+               "Memphis", "Indiana", "Chicago", "Detroit", "Houston", "LA Lakers", "LA Lakers", 
+               "Phoenix", "Utah", "New Orleans"),
+  home_game = c(FALSE, FALSE, TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, TRUE, TRUE, TRUE, TRUE, 
+                TRUE, TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, 
+                FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, 
+                FALSE, TRUE, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, TRUE, TRUE, TRUE, 
+                TRUE, FALSE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE, 
+                FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, FALSE, FALSE, TRUE, 
+                TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, FALSE, FALSE, FALSE),
+  is_national_tv = c(TRUE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE, 
+                     FALSE, FALSE, TRUE, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, 
+                     TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, 
+                     FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, 
+                     FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, TRUE, FALSE, FALSE, TRUE, 
+                     FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, 
+                     FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE)
+)
+
+player_info <- data.frame(
+  player_name = c("Shai Gilgeous-Alexander", "Chet Holmgren", "Jalen Williams", 
+                  "Alex Caruso", "Isaiah Hartenstein", "Cason Wallace",
+                  "Luguentz Dort", "Buddy Boeheim", "Ousmane Dieng", "Alex Ducas",
+                  "Adam Flagler", "Isiah Joe", "Dillon Jones", "Ajay Mitchell", 
+                  "Nikola Topic", "Aaron Wiggins", "Jaylin Williams", 
+                  "Kenrich Williams"),
+  is_star = c(TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, 
+              FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE)
+)
+
+# UI Definition
+ui <- fluidPage(
+  titlePanel("OKC Thunder Player Rest Regular-Season Schedule Generator"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("injured_player", "Select Player to Mark Injured", 
+                  choices = c("None", player_info$player_name),
+                  selected = "None"),
+      dateRangeInput("injury_dates", "Select Injury Dates", 
+                     start = min(okc_schedule$date), 
+                     end = max(okc_schedule$date)),
+      numericInput("rest_days", "Minimum Days Between Rests", 
+                   value = 5, min = 1, max = 20),
+      actionButton("generate_schedule", "Generate Rest Schedule")
+    ),
+    mainPanel(
+      verbatimTextOutput("debug_output"),
+      tableOutput("rest_schedule")
+    )
+  )
+)
+
+# Server Logic
+server <- function(input, output, session) {
+  
+  # Reactive values
+  rv <- reactiveValues(
+    player_info = player_info,
+    schedule = okc_schedule,
+    debug_message = ""
+  )
+  
+  # Generate rest schedule
+  observeEvent(input$generate_schedule, {
+    # Reset the schedule
+    schedule <- okc_schedule
+    schedule$rest_player <- NA_character_
+    
+    star_players <- rv$player_info %>%
+      filter(is_star) %>%
+      pull(player_name)
+    
+    non_star_players <- rv$player_info %>%
+      filter(!is_star) %>%
+      pull(player_name)
+    
+    rv$debug_message <- paste("Star players:", paste(star_players, collapse = ", "))
+    
+    last_rest <- setNames(as.Date(rep("1970-01-01", length(star_players))), star_players)
+    
+    # First, apply league rest rules for star players
+    for (i in seq_len(nrow(schedule))) {
+      if (!schedule$is_national_tv[i]) {
+        eligible_players <- star_players[difftime(schedule$date[i], last_rest[star_players], units = "days") > input$rest_days]
+        if (length(eligible_players) > 0) {
+          resting_player <- sample(eligible_players, 1)
+          schedule$rest_player[i] <- resting_player
+          last_rest[resting_player] <- schedule$date[i]
+        }
+      }
+    }
+    
+    # Apply injury information for star and non-star players
+    if (input$injured_player != "None") {
+      injury_start <- input$injury_dates[1]
+      injury_end <- input$injury_dates[2]
+      injured_days <- schedule$date >= injury_start & schedule$date <= injury_end
+      
+      if (input$injured_player %in% star_players || input$injured_player %in% non_star_players) {
+        # Avoid duplicate entries of the same player on the same day
+        schedule$rest_player[injured_days] <- sapply(schedule$rest_player[injured_days], function(x) {
+          if (!is.na(x) && grepl(input$injured_player, x)) {
+            return(x) # Player already marked as resting
+          } else if (is.na(x)) {
+            return(input$injured_player)
+          } else {
+            return(paste(x, input$injured_player, sep = ", "))
+          }
+        })
+      }
+    }
+    
+    rv$schedule <- schedule
+    rv$debug_message <- paste(rv$debug_message, "\nSchedule generated with", sum(!is.na(schedule$rest_player)), "rest days assigned")
+    
+    if (input$injured_player != "None") {
+      rv$debug_message <- paste(rv$debug_message, "\nInjured player:", input$injured_player, 
+                                "from", as.character(input$injury_dates[1]), "to", as.character(input$injury_dates[2]))
+    }
+  })
+  
+  # Render rest schedule
+  output$rest_schedule <- renderTable({
+    req(rv$schedule)
+    rv$schedule %>%
+      mutate(
+        date = as.character(date),
+        rest_player = ifelse(is.na(rest_player), "", rest_player)
+      ) %>%
+      select(date, opponent, home_game, is_national_tv, rest_player)
+  })
+  
+  # Debug output
+  output$debug_output <- renderText({
+    rv$debug_message
+  })
+}
+
+# Run the Shiny application
+shinyApp(ui = ui, server = server)
